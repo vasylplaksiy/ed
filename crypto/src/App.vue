@@ -68,11 +68,11 @@
         </div>
         <hr class="w-full border-t border-gray-600 my-4"/>
         <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
-          <div v-for="t in filteredTickers()"
+          <div v-for="t in paginatedTickers"
                :key="t.name"
                @click="select(t)"
                :class="{
-                 'border-4':sel===t
+                 'border-4':selectedTicker===t
                }"
                class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
           >
@@ -97,7 +97,7 @@
                   aria-hidden="true"
               >
                 <path
-                    @click="sel = null"
+                    @click="selectedTicker = null"
                     fill-rule="evenodd"
                     d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
                     clip-rule="evenodd"
@@ -112,12 +112,12 @@
 
 
 
-      <section v-if="sel" class="relative">
+      <section v-if="selectedTicker" class="relative">
         <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
-          {{ sel.name }} - USD
+          {{ selectedTicker.name }} - USD
         </h3>
         <div class="flex items-end border-gray-600 border-b border-l h-64">
-          <div v-for="(bar, idx) in normalizeGraph()"
+          <div v-for="(bar, idx) in normalizedGraph"
                :key="idx"
                :style="{height: `${bar}%`}"
                class="bg-purple-800 border w-10 "
@@ -127,7 +127,7 @@
         <button
             type="button"
             class="absolute top-0 right-0"
-            @click="sel = null"
+            @click="selectedTicker = null"
         >
           <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -167,13 +167,12 @@ export default {
       tickerDoubled: false,
       tickerAvailable: true,
       tickers: [],
-      sel: null,
+      selectedTicker: null,
       graph: [],
       coins: [],
       coinsAutocomplete: [],
       page: 1,
-      filter: "",
-      hasNextPage: false
+      filter: ""
     }
   },
 
@@ -191,19 +190,41 @@ export default {
     this.getCoinsList();
   },
 
-  methods: {
-
-    filteredTickers(){
-      const start = (this.page - 1) * 6,
-            end = this.page * 6 - 1;
-
-      const filteredTickersList = this.tickers.filter((ticker=>ticker.name.toLowerCase().includes(this.filter.toLowerCase())));
-
-      this.hasNextPage = filteredTickersList.length > end;
-
-      return filteredTickersList.slice(start, end);
+  computed: {
+    startIndex(){
+      return (this.page - 1) * 6;
     },
+    endIndex(){
+      return this.page * 6 - 1;
+    },
+    filteredTickers(){
+      return this.tickers.filter(ticker => ticker.name.toLowerCase().includes(this.filter.toLowerCase()));
+    },
+    paginatedTickers(){
+      return this.filteredTickers.slice(this.startIndex, this.endIndex);
+    },
+    hasNextPage(){
+      return this.filteredTickers.length > this.endIndex;
+    },
+    normalizedGraph() {
+      const maxValue = Math.max(...this.graph);
+      const minValue = Math.min(...this.graph);
+      if(maxValue === minValue){
+        return this.graph.map(()=>50);
+      }
+      else {
+        return this.graph.map(price => 5 + ((price - minValue) * 95) / (maxValue - minValue));
+      }
+    },
+    pageStateOptions(){
+      return {
+        filter: this.filter,
+        page: this.page
+      }
+    }
+  },
 
+  methods: {
     async getCoinsList() {
       const coinsUrl = 'https://min-api.cryptocompare.com/data/all/coinlist?summary=true';
       const coinsUrlGet = await fetch(coinsUrl);
@@ -220,7 +241,7 @@ export default {
             `https://min-api.cryptocompare.com/data/price?fsym=${tickerName}&tsyms=USD&api_key=${apiKey}`);
         const data = await f.json();
         this.tickers.find(t => t.name === tickerName).price = data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
-        if (this.sel?.name === tickerName) {
+        if (this.selectedTicker?.name === tickerName) {
           this.graph.push(data.USD);
         }
       }, 5000);
@@ -232,11 +253,6 @@ export default {
         price: "-"
       }
 
-
-
-      // 0 5
-      // 6 11
-      // 6 * (page-1), 6 * page -1
       if(this.tickerDoubled){
         this.ticker = "";
         this.coinsAutocomplete = [];
@@ -249,10 +265,8 @@ export default {
         return false;
       }
 
-      this.tickers.push(currentTicker);
+      this.tickers = [...this.tickers, currentTicker];
       this.filter = "";
-
-      localStorage.setItem("cryptomicon-list", JSON.stringify(this.tickers));
 
       this.subscribeToUpdates(currentTicker.name);
       this.ticker = "";
@@ -261,15 +275,13 @@ export default {
     },
 
 
-    handeDelete(tickerRemove) {
-      this.tickers = this.tickers.filter(t => t != tickerRemove);
+    handeDelete(tickerToRemove) {
+      this.tickers = this.tickers.filter(t => t != tickerToRemove);
+      if(this.selectedTicker === tickerToRemove){
+        this.selectedTicker = null;
+      }
     },
 
-    normalizeGraph() {
-      const maxValue = Math.max(...this.graph);
-      const minValue = Math.min(...this.graph);
-      return this.graph.map(price => 5 + ((price - minValue) * 95) / (maxValue - minValue));
-    },
 
     getCoinsAutocomplete() {
       const currentTicker = {
@@ -284,7 +296,6 @@ export default {
         }
       }
 
-
       const results = this.coins.filter(findTickerInside);
       function findTickerInside(value) {
         return value.toLowerCase().includes(currentTicker.name.toLowerCase())
@@ -298,18 +309,31 @@ export default {
     },
 
     select(ticker) {
-      this.sel = ticker;
-      this.graph = [];
+      this.selectedTicker = ticker;
     }
   },
 
   watch: {
+    selectedTicker: function (){
+      this.graph = [];
+    },
+    paginatedTickers(){
+      if(this.paginatedTickers.length === 0 && this.page > 1) {
+        this.page -= 1;
+      }
+    },
+    tickers(){
+      localStorage.setItem("cryptomicon-list", JSON.stringify(this.tickers));
+    },
     filter(){
       this.page = 1;
-      history.pushState(null, document.title, `${window.location.pathname}?filter=${this.filter}&page=${this.page}`);
     },
-    page(){
-      history.pushState(null, document.title, `${window.location.pathname}?filter=${this.filter}&page=${this.page}`);
+    pageStateOptions(v){
+      history.pushState(
+          null,
+          document.title,
+          `${window.location.pathname}?filter=${v.filter}&page=${v.page}`
+      );
     }
   }
 }
